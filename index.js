@@ -52,9 +52,15 @@ async function startListening() {
           token: fcmToken,
           notification: {
             title: senderName,
-            body: '📨 Sent you a message',
+            body: '📨 New message', // fallback
           },
-          data: { senderUid, recipientUid },
+          data: {
+            senderUid,
+            recipientUid,
+            // Send the raw encrypted fields so the device can decrypt
+            encryptedText: data.encryptedText ?? '',
+            iv: data.iv ?? '',
+          },
           android: {
             priority: 'high',
             notification: {
