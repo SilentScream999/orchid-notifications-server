@@ -18,8 +18,17 @@ const messaging = admin.messaging();
 async function startListening() {
   console.log('👂 Listening for new messages...');
 
+  // Only notify about messages received after this server started
+  const serverStartTime = Date.now();
+  console.log(`⏱️ Server start time: ${serverStartTime}`);
+
   db.collectionGroup('messages').onSnapshot(async (snapshot) => {
-    const newDocs = snapshot.docChanges().filter(c => c.type === 'added');
+    const newDocs = snapshot.docChanges().filter(c => {
+      if (c.type !== 'added') return false;
+      const ts = c.doc.data().timestamp;
+      // Skip anything older than when this server instance started
+      return ts && ts > serverStartTime;
+    });
 
     for (const change of newDocs) {
       try {
@@ -35,20 +44,27 @@ async function startListening() {
         const senderName = senderSnap.exists
           ? (senderSnap.data()?.username ?? 'Someone')
           : 'Someone';
+        const senderAvatar = senderSnap.exists
+          ? (senderSnap.data()?.avatar ?? '')
+          : '';
+
+        console.log(`📸 Avatar URL for ${senderName}: ${senderAvatar}`);
 
         const recipientSnap = await db
           .doc(`accounts/${recipientUid}/profile/info`)
           .get();
         const fcmToken = recipientSnap.data()?.fcmToken;
-        if (!fcmToken) continue;
+        if (!fcmToken) {
+          console.log(`⚠️ No FCM token for recipient ${recipientUid}`);
+          continue;
+        }
 
         await messaging.send({
           token: fcmToken,
-          // No notification field — data-only so Android routes to our service
           data: {
             senderUid,
             senderName,
-            senderAvatar: senderSnap.exists ? (senderSnap.data()?.avatar ?? '') : '',
+            senderAvatar,
             recipientUid,
             encryptedText: data.encryptedText ?? '',
             iv: data.iv ?? '',
@@ -65,6 +81,7 @@ async function startListening() {
           const recipientUid = parts[1];
           await db.doc(`accounts/${recipientUid}/profile/info`)
             .update({ fcmToken: admin.firestore.FieldValue.delete() });
+          console.log(`🗑️ Removed stale FCM token for ${recipientUid}`);
         } else {
           console.error('Failed to send notification:', e);
         }
