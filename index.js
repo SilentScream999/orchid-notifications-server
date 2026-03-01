@@ -48,6 +48,7 @@ async function startListening() {
           data: {
             senderUid,
             senderName,
+            senderAvatar: senderSnap.exists ? (senderSnap.data()?.avatar ?? '') : '',
             recipientUid,
             encryptedText: data.encryptedText ?? '',
             iv: data.iv ?? '',
