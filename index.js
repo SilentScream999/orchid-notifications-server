@@ -1,6 +1,5 @@
 const express = require('express');
 const admin = require('firebase-admin');
-
 const app = express();
 app.use(express.json());
 
@@ -17,8 +16,6 @@ const messaging = admin.messaging();
 
 async function startListening() {
   console.log('👂 Listening for new messages...');
-
-  // Only notify about messages received after this server started
   const serverStartTime = Date.now();
   console.log(`⏱️ Server start time: ${serverStartTime}`);
 
@@ -26,7 +23,6 @@ async function startListening() {
     const newDocs = snapshot.docChanges().filter(c => {
       if (c.type !== 'added') return false;
       const ts = c.doc.data().timestamp;
-      // Skip anything older than when this server instance started
       return ts && ts > serverStartTime;
     });
 
@@ -36,28 +32,38 @@ async function startListening() {
         const path = change.doc.ref.path;
         const parts = path.split('/');
         const recipientUid = parts[1];
-        const senderUid = parts[3];
+        const senderUid    = parts[3];
 
         if (data.sender === recipientUid) continue;
 
-        const senderSnap = await db.doc(`usernames/${senderUid}`).get();
-        const senderName = senderSnap.exists
-          ? (senderSnap.data()?.username ?? 'Someone')
-          : 'Someone';
-        const senderAvatar = senderSnap.exists
-          ? (senderSnap.data()?.avatar ?? '')
-          : '';
-
-        console.log(`📸 Avatar URL for ${senderName}: ${senderAvatar}`);
-
+        // ── Fetch recipient profile (FCM token + active-DM state) ──────────
         const recipientSnap = await db
           .doc(`accounts/${recipientUid}/profile/info`)
           .get();
-        const fcmToken = recipientSnap.data()?.fcmToken;
+
+        const recipientData  = recipientSnap.data() ?? {};
+        const fcmToken       = recipientData.fcmToken;
+        const appForeground  = recipientData.appForeground  ?? false;
+        const activeDMUid    = recipientData.activeDMUid    ?? null;
+
+        // ── Suppress if the app/tab is open at all ────────────────────────
+        if (appForeground) {
+          console.log(
+            `⏭️  Skipped notification for ${recipientUid} — app is open`
+          );
+          continue;
+        }
+
         if (!fcmToken) {
           console.log(`⚠️ No FCM token for recipient ${recipientUid}`);
           continue;
         }
+
+        // ── Sender profile ─────────────────────────────────────────────────
+        const senderSnap   = await db.doc(`usernames/${senderUid}`).get();
+        const senderName   = senderSnap.exists ? (senderSnap.data()?.username ?? 'Someone') : 'Someone';
+        const senderAvatar = senderSnap.exists ? (senderSnap.data()?.avatar   ?? '')        : '';
+        console.log(`📸 Avatar URL for ${senderName}: ${senderAvatar}`);
 
         await messaging.send({
           token: fcmToken,
@@ -67,17 +73,16 @@ async function startListening() {
             senderAvatar,
             recipientUid,
             encryptedText: data.encryptedText ?? '',
-            iv: data.iv ?? '',
+            iv:            data.iv            ?? '',
           },
-          android: {
-            priority: 'high',
-          },
+          android: { priority: 'high' },
         });
 
         console.log(`✅ Notified ${recipientUid} about message from ${senderName}`);
+
       } catch (e) {
         if (e.code === 'messaging/registration-token-not-registered') {
-          const parts = change.doc.ref.path.split('/');
+          const parts        = change.doc.ref.path.split('/');
           const recipientUid = parts[1];
           await db.doc(`accounts/${recipientUid}/profile/info`)
             .update({ fcmToken: admin.firestore.FieldValue.delete() });
