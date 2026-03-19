@@ -46,6 +46,8 @@ async function startListening() {
         const appForeground  = recipientData.appForeground  ?? false;
         const activeDMUid    = recipientData.activeDMUid    ?? null;
 
+        console.log(`🔍 appForeground for ${recipientUid}: ${appForeground} (raw: ${recipientData.appForeground})`);
+
         // ── Suppress if the app/tab is open at all ────────────────────────
         if (appForeground) {
           console.log(
